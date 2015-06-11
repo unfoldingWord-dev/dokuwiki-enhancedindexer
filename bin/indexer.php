@@ -1,10 +1,16 @@
 #!/usr/bin/php
 <?php
-if(!defined('DOKU_INC')) define('DOKU_INC', realpath(dirname(__FILE__).'/../../../../').'/');
+if(!defined('DOKU_INC')) {
+    define('DOKU_INC', realpath(dirname(__FILE__).'/../../../../').'/');
+}
+define('ENHANCED_INDEXER_INC', realpath(dirname(__FILE__).'/../').'/');
 
 define('NOSESSION', 1);
 require_once(DOKU_INC.'inc/init.php');
 
+if(class_exists('DokuCLI') == false) {
+    require_once(ENHANCED_INDEXER_INC.'inc/cli.php');
+} 
 /**
  * Update the Search Index from command line
  */
