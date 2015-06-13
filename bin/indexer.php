@@ -20,6 +20,7 @@ class EnhancedIndexerCLI extends DokuCLI {
     private $clear = false;
     private $force = false;
     private $namespace = '';
+    private $removeLocks = false;
 
     /**
      * Register options and arguments on the given $options object
@@ -64,6 +65,12 @@ class EnhancedIndexerCLI extends DokuCLI {
             'i',
             true // needs arg
         );
+        
+        $options->registerOption(
+            'remove-locks',
+            'remove any locks on the indexer',
+            'l'
+        );
     }
 
     /**
@@ -79,6 +86,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         $this->quiet = $options->getOpt('quiet');
         $this->force = $options->getOpt('force');
         $this->namespace = $options->getOpt('namespace', '');
+        $this->removeLocks = $options->getOpt('remove-locks', '');
         
         $id = $options->getOpt('id');
         
@@ -101,6 +109,10 @@ class EnhancedIndexerCLI extends DokuCLI {
     function update() {
         global $conf;
         $data = array();
+        if($this->lock() == false) {
+            $this->error('unable to get lock, bailing');
+            return;
+        }
         $this->quietecho("Searching pages... ");
         if($this->namespace) {
             $dir = $conf['datadir'].'/'. str_replace(':', DIRECTORY_SEPARATOR, $this->namespace);
@@ -115,6 +127,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         foreach($data as $val) {
             $this->index($idPrefix.$val['id']);
         }
+        $this->unlock();
     }
 
     /**
@@ -147,6 +160,46 @@ class EnhancedIndexerCLI extends DokuCLI {
             echo $msg;
         }
     }
+    
+    /**
+     * Lock the indexer.
+     */
+    protected function lock() {
+        global $conf;
+        $status = true;
+        
+        $lock = $conf['lockdir'].'/_enhanced_indexer.lock';
+        if (!@mkdir($lock, $conf['dmode'])) {
+            if(is_dir($lock) && $this->removeLocks) {
+                // looks like a stale lock - remove it
+                if (!@rmdir($lock)) {
+                    $status = "removing the stale lock failed";
+                    return false;
+                } else {
+                    $status = "stale lock removed";
+                    return true;
+                }
+            } else {
+                return false;
+            }
+        }
+        if (!empty($conf['dperm'])) {
+            chmod($lock, $conf['dperm']);
+        }
+        return $status;
+    }
+
+    /**
+     * Release the indexer lock.
+     *
+     * @author Tom N Harris <tnharris@whoopdedo.org>
+     */
+    protected function unlock() {
+        global $conf;
+        @rmdir($conf['lockdir'].'/_enhanced_indexer.lock');
+        return true;
+    }
+    
 }
 
 // Main
