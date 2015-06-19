@@ -11,6 +11,8 @@ require_once(DOKU_INC.'inc/init.php');
 if(class_exists('DokuCLI') == false) {
     require_once(ENHANCED_INDEXER_INC.'inc/cli.php');
 } 
+
+require_once(ENHANCED_INDEXER_INC.'inc/Doku_Indexer_Enhanced.php');
 /**
  * Update the Search Index from command line
  */
@@ -21,6 +23,7 @@ class EnhancedIndexerCLI extends DokuCLI {
     private $force = false;
     private $namespace = '';
     private $removeLocks = false;
+    private $exit = false;
 
     /**
      * Register options and arguments on the given $options object
@@ -72,6 +75,15 @@ class EnhancedIndexerCLI extends DokuCLI {
             'l'
         );
     }
+    
+    
+    public function __destruct() 
+    {
+        $this->quietecho('Saving Indexes...');
+        enhanced_idx_get_indexer()->flushIndexes();
+        $this->removeLocks();
+        $this->quietecho("done\n");
+    }
 
     /**
      * Your main program
@@ -90,17 +102,22 @@ class EnhancedIndexerCLI extends DokuCLI {
         
         $id = $options->getOpt('id');
         
+        if($this->removeLocks) {
+            $this->removeLocks();
+        }
+        
         if($id) {
             $this->index($id);
             $this->quietecho("done.\n");
-            return;
-        }
+        } else {
 
-        if($this->clear) {
-            $this->clearindex();
-        }
+            if($this->clear) {
+                $this->clearindex();
+            }
 
-        $this->update();
+            $this->update();
+        }
+        
     }
 
     /**
@@ -126,8 +143,16 @@ class EnhancedIndexerCLI extends DokuCLI {
 
         foreach($data as $val) {
             $this->index($idPrefix.$val['id']);
+            if($this->exit) {
+                exit();
+            }
+            
+            if(memory_get_usage() > return_bytes(ini_get('memory_limit')) * 0.9) { 
+                // we've used up 90% memory try again.
+                $this->error('Memory full, restart me please');
+                exit();
+            }
         }
-        $this->unlock();
     }
 
     /**
@@ -137,7 +162,7 @@ class EnhancedIndexerCLI extends DokuCLI {
      */
     function index($id) {
         $this->quietecho("$id... ");
-        idx_addPage($id, !$this->quiet, $this->force);
+        enhanced_idx_addPage($id, !$this->quiet, $this->force);
         $this->quietecho("done.\n");
     }
 
@@ -146,7 +171,7 @@ class EnhancedIndexerCLI extends DokuCLI {
      */
     function clearindex() {
         $this->quietecho("Clearing index... ");
-        idx_get_indexer()->clear();
+        enhanced_idx_get_indexer()->clear();
         $this->quietecho("done.\n");
     }
 
@@ -194,14 +219,50 @@ class EnhancedIndexerCLI extends DokuCLI {
      *
      * @author Tom N Harris <tnharris@whoopdedo.org>
      */
-    protected function unlock() {
+    protected function unlock() 
+    {
         global $conf;
         @rmdir($conf['lockdir'].'/_enhanced_indexer.lock');
         return true;
     }
     
+    public function removeLocks()
+    {
+        global $conf;
+        @rmdir($conf['lockdir'].'/_enhanced_indexer.lock');
+        @rmdir($conf['lockdir'].'/_indexer.lock');
+        return true;
+    }
+    
+    public function sigInt()
+    {
+        $this->exit = true;
+    }
 }
 
 // Main
 $cli = new EnhancedIndexerCLI();
+
+if(function_exists('pcntl_signal')) {
+    // ensure things exit cleanly with ctrl+c
+    declare(ticks = 10);
+
+    pcntl_signal(SIGINT, array($cli, 'sigInt'));  
+    pcntl_signal(SIGTERM, array($cli, 'sigInt'));
+}
+
+$conf['cachetime'] = 60 * 60; // default is -1 which means cache isnt' used :(
+
 $cli->run();
+
+
+function return_bytes ($size_str)
+{
+    switch (substr ($size_str, -1))
+    {
+        case 'M': case 'm': return (int)$size_str * 1048576;
+        case 'K': case 'k': return (int)$size_str * 1024;
+        case 'G': case 'g': return (int)$size_str * 1073741824;
+        default: return $size_str;
+    }
+}
