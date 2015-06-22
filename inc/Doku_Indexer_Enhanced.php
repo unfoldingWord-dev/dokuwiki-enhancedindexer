@@ -93,7 +93,7 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
         if(isset($this->indexesToFlush[$key]) === false) {
             $this->indexesToFlush[$key] = array($idx,$suffix);
         }
-        
+        return true;
     }
 
     /**
