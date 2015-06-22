@@ -24,6 +24,8 @@ class EnhancedIndexerCLI extends DokuCLI {
     private $namespace = '';
     private $removeLocks = false;
     private $exit = false;
+    private $clean = false;
+    private $maxRuns = 0;
 
     /**
      * Register options and arguments on the given $options object
@@ -74,15 +76,30 @@ class EnhancedIndexerCLI extends DokuCLI {
             'remove any locks on the indexer',
             'l'
         );
+        
+        $options->registerOption(
+            'max-runs',
+            'Restart after indexing n items',
+            'r',
+            true
+        );
     }
     
     
     public function __destruct() 
     {
-        $this->quietecho('Saving Indexes...');
-        enhanced_idx_get_indexer()->flushIndexes();
-        $this->removeLocks();
-        $this->quietecho("done\n");
+        $this->cleanup();
+    }
+    
+    private function cleanup()
+    {
+        if($this->clean == false) {
+            $this->quietecho('Saving Indexes...');
+            enhanced_idx_get_indexer()->flushIndexes();
+            $this->removeLocks();
+            $this->quietecho("done\n");
+            $this->clean = true;
+        }
     }
 
     /**
@@ -99,6 +116,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         $this->force = $options->getOpt('force');
         $this->namespace = $options->getOpt('namespace', '');
         $this->removeLocks = $options->getOpt('remove-locks', '');
+        $this->maxRuns = $options->getOpt('max-runs', 0);
         
         $id = $options->getOpt('id');
         
@@ -138,21 +156,40 @@ class EnhancedIndexerCLI extends DokuCLI {
             $dir = $conf['datadir'];
             $idPrefix = '';
         }
-        search($data, $dir, 'search_allpages', array('skipacl' => true));
+        search($data, $dir, 'search_allpages', array('skipacl' => true), '', 1, null);
         $this->quietecho(count($data)." pages found.\n");
 
+        $i = 0;
         foreach($data as $val) {
-            $this->index($idPrefix.$val['id']);
+            if(($this->index($idPrefix.$val['id']))) {
+                $i++;
+            } 
+                    
             if($this->exit) {
                 exit();
             }
             
-            if(memory_get_usage() > return_bytes(ini_get('memory_limit')) * 0.9) { 
-                // we've used up 90% memory try again.
-                $this->error('Memory full, restart me please');
-                exit();
+            if(memory_get_usage() > return_bytes(ini_get('memory_limit')) * 0.8) { 
+                // we've used up 80% memory try again.
+                $this->error('Memory almost full, restarting');
+                $this->restart();
+            }
+            
+            if($i >= $this->maxRuns) {
+                $this->error('Max runs reached '.$i.', restarting');
+                $this->restart();
             }
         }
+    }
+    
+    function restart()
+    {
+        global $argv;
+        $this->cleanup();
+        $args = $argv;
+        array_unshift($args, '-d', 'memory_limit='.ini_get('memory_limit'));
+        pcntl_exec($_SERVER['_'], $args);
+        exit();
     }
 
     /**
@@ -162,8 +199,7 @@ class EnhancedIndexerCLI extends DokuCLI {
      */
     function index($id) {
         $this->quietecho("$id... ");
-        enhanced_idx_addPage($id, !$this->quiet, $this->force);
-        $this->quietecho("done.\n");
+        return enhanced_idx_addPage($id, !$this->quiet, $this->force || $this->clear);
     }
 
     /**
