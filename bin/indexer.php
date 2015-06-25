@@ -26,6 +26,7 @@ class EnhancedIndexerCLI extends DokuCLI {
     private $exit = false;
     private $clean = false;
     private $maxRuns = 0;
+    private $startOffset = 0;
 
     /**
      * Register options and arguments on the given $options object
@@ -83,6 +84,13 @@ class EnhancedIndexerCLI extends DokuCLI {
             'r',
             true
         );
+        
+        $options->registerOption(
+            'start',
+            'start at offset',
+            's',
+            true
+        );
     }
     
     
@@ -117,6 +125,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         $this->namespace = $options->getOpt('namespace', '');
         $this->removeLocks = $options->getOpt('remove-locks', '');
         $this->maxRuns = $options->getOpt('max-runs', 0);
+        $this->startOffset = $options->getOpt('start', 0);
         
         $id = $options->getOpt('id');
         
@@ -156,13 +165,17 @@ class EnhancedIndexerCLI extends DokuCLI {
             $dir = $conf['datadir'];
             $idPrefix = '';
         }
-        search($data, $dir, 'search_allpages', array('skipacl' => true), '', 1, null);
+        search($data, $dir, 'search_allpages', array('skipacl' => true));
         $this->quietecho(count($data)." pages found.\n");
 
-        $i = 0;
-        foreach($data as $val) {
-            if(($this->index($idPrefix.$val['id']))) {
-                $i++;
+        $cnt = 0;
+        
+        
+        $length = count($data);
+        for($i=$this->startOffset; $i < $length; $i++) {
+            
+            if(($this->index($idPrefix.$data[$i]['id']))) {
+                $cnt++;
             } 
                     
             if($this->exit) {
@@ -172,22 +185,31 @@ class EnhancedIndexerCLI extends DokuCLI {
             if(memory_get_usage() > return_bytes(ini_get('memory_limit')) * 0.8) { 
                 // we've used up 80% memory try again.
                 $this->error('Memory almost full, restarting');
-                $this->restart();
+                $this->restart($i+1);
             }
             
-            if($i >= $this->maxRuns) {
-                $this->error('Max runs reached '.$i.', restarting');
-                $this->restart();
+            if($this->maxRuns && $cnt >= $this->maxRuns) {
+                $this->error('Max runs reached '.$cnt.', restarting');
+                $this->restart($i+1);
             }
         }
     }
     
-    function restart()
+    function restart($start = 0)
     {
         global $argv;
         $this->cleanup();
         $args = $argv;
         array_unshift($args, '-d', 'memory_limit='.ini_get('memory_limit'));
+        
+        foreach($args as $key => $arg) {
+            if($arg == '--clear' || $arg == '-c') {
+                $args[$key] = '--force';
+            }
+        }
+        
+        array_push($args, '--start', $start);
+        
         pcntl_exec($_SERVER['_'], $args);
         exit();
     }
