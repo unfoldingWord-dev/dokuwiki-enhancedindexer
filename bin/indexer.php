@@ -24,7 +24,7 @@ class EnhancedIndexerCLI extends DokuCLI {
     private $namespace = '';
     private $removeLocks = false;
     private $exit = false;
-    private $clean = false;
+    private $clean = true;
     private $maxRuns = 0;
     private $startOffset = 0;
 
@@ -155,6 +155,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         $data = array();
         if($this->lock() == false) {
             $this->error('unable to get lock, bailing');
+            exit(1);
             return;
         }
         $this->quietecho("Searching pages... ");
@@ -176,6 +177,7 @@ class EnhancedIndexerCLI extends DokuCLI {
             
             if(($this->index($idPrefix.$data[$i]['id']))) {
                 $cnt++;
+                $this->clean = false;
             } 
                     
             if($this->exit) {
