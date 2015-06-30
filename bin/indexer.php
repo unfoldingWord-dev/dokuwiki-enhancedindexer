@@ -104,10 +104,11 @@ class EnhancedIndexerCLI extends DokuCLI {
         if($this->clean == false) {
             $this->quietecho('Saving Indexes...');
             enhanced_idx_get_indexer()->flushIndexes();
-            $this->removeLocks();
             $this->quietecho("done\n");
             $this->clean = true;
         }
+        
+        $this->removeLocks();
     }
 
     /**
@@ -273,25 +274,26 @@ class EnhancedIndexerCLI extends DokuCLI {
         }
         return $status;
     }
-
-    /**
-     * Release the indexer lock.
-     *
-     * @author Tom N Harris <tnharris@whoopdedo.org>
-     */
-    protected function unlock() 
-    {
-        global $conf;
-        @rmdir($conf['lockdir'].'/_enhanced_indexer.lock');
-        return true;
-    }
     
     public function removeLocks()
     {
         global $conf;
-        @rmdir($conf['lockdir'].'/_enhanced_indexer.lock');
-        @rmdir($conf['lockdir'].'/_indexer.lock');
-        return true;
+        
+        $this->quietecho('clearing lock...');
+        $return = true;
+        
+        if(is_dir($conf['lockdir'].'/_enhanced_indexer.lock') && !rmdir($conf['lockdir'].'/_enhanced_indexer.lock')) {
+            $this->error('failed to remove '.$conf['lockdir'].'/_enhanced_indexer.lock something is wrong');
+            $return  = false;
+        }
+        
+        if(is_dir($conf['lockdir'].'/_indexer.lock') && !rmdir($conf['lockdir'].'/_indexer.lock')) {
+            $this->error('failed to remove '.$conf['lockdir'].'/_indexer.lock something is wrong');
+            $return  = false;
+        }
+        $this->quietecho('done.\n');
+        
+        return $return;
     }
     
     public function sigInt()
