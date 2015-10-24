@@ -12,7 +12,7 @@
  * @author david
  */
 class Doku_Indexer_Enhanced extends Doku_Indexer {
-    
+
     protected $indexes = array();
     protected $indexesToFlush = array();
 
@@ -30,11 +30,11 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
      * @author Tom N Harris <tnharris@whoopdedo.org>
      */
     protected function getIndex($idx, $suffix) {
-        
+
         if(isset($this->indexes[$idx.$suffix]) === false) {
             $this->indexes[$idx.$suffix] = parent::getIndex($idx, $suffix);
         }
-        
+
         return $this->indexes[$idx.$suffix];
     }
 
@@ -53,7 +53,7 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
         if(isset($this->indexesToFlush[$key]) === false) {
             $this->indexesToFlush[$idx.$suffix] = array($idx,$suffix);
         }
-        
+
         return true;
     }
 
@@ -67,7 +67,7 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
      * @author Tom N Harris <tnharris@whoopdedo.org>
      */
     protected function getIndexKey($idx, $suffix, $id) {
-        
+
         $index = $this->getIndex($idx, $suffix);
         return $index[$id];
     }
@@ -87,9 +87,9 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
         if(isset($this->indexes[$key]) === false) {
             $this->indexes[$key] = parent::getIndex($idx, $suffix);
         }
-        
+
         $this->indexes[$key][$id] = $line;
-                
+
         if(isset($this->indexesToFlush[$key]) === false) {
             $this->indexesToFlush[$key] = array($idx,$suffix);
         }
@@ -110,9 +110,9 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
         if(isset($this->indexes[$key]) === false) {
             $this->indexes[$key] = parent::getIndex($idx, $suffix);
         }
-        
+
         $id = array_search($value, $this->indexes[$key], true);
-        
+
         if ($id === false) {
             $id = count($this->indexes[$key]);
             $this->indexes[$key][$id] = $value;
@@ -120,10 +120,10 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
                 $this->indexesToFlush[$key] = array($idx,$suffix);
             }
         }
-        
+
         return $id;
     }
-    
+
     public function flushIndexes()
     {
         foreach($this->indexesToFlush as $indexPair) {
@@ -131,8 +131,8 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
         }
         $this->indexesToFlush = array();
     }
-    
-    
+
+
     /**
      * Insert or replace a tuple in a line.
      *
@@ -140,7 +140,7 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
      */
     protected function updateTuple($line, $id, $count) {
         if ($line !== '') {
-            
+
             if(substr($line, 0, strlen($id)) == $id) { // add check here see if line start with id, makes our regex 10x faster
                 $newLine = preg_replace('/^'.preg_quote($id,'/').'\*\d*/', '', $line);
             } else {
@@ -270,7 +270,7 @@ function enhanced_idx_addPage($page, $verbose=false, $force=false) {
 /**
  * Create an instance of the indexer.
  *
- * @return Doku_Indexer               a Doku_Indexer
+ * @return Doku_Indexer_Enhanced
  * @author Tom N Harris <tnharris@whoopdedo.org>
  */
 function enhanced_idx_get_indexer() {

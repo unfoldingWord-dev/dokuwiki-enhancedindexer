@@ -1,18 +1,40 @@
 #!/usr/bin/php
 <?php
+/**
+ * Usage:  indexer.php <options>
+ *
+ * Updates the search index by indexing all new or changed pages.
+ * When the -c option is given the index is cleared first.
+ *
+ * Options:
+ *   -h, --help               Display this help screen and exit immediately.
+ *   -c, --clear              Clear the index before updating.
+ *   -f, --force              Force the index rebuilding, skip date check.
+ *   -i <s>, --id <s>         Only update specific id.
+ *   -r <n>, --max-runs <n>   Restart after indexing n items.
+ *   -n <s>, --namespace <s>  Only update items in namespace.
+ *   -q, --quiet              Don't produce any output.
+ *   -s <n>, --start <n>      Start at offset.
+ *   --no-colors              Don't use any colors in output. Useful when piping output to other tools or files.
+ */
+
 if(!defined('DOKU_INC')) {
     define('DOKU_INC', realpath(dirname(__FILE__).'/../../../../').'/');
 }
-define('ENHANCED_INDEXER_INC', realpath(dirname(__FILE__).'/../').'/');
 
 define('NOSESSION', 1);
+
+/** @noinspection PhpIncludeInspection */
 require_once(DOKU_INC.'inc/init.php');
 
 if(class_exists('DokuCLI') == false) {
-    require_once(ENHANCED_INDEXER_INC.'inc/cli.php');
-} 
+    /** @noinspection PhpIncludeInspection */
+    require_once(DOKU_INC.'inc/cli.php');
+}
 
-require_once(ENHANCED_INDEXER_INC.'inc/Doku_Indexer_Enhanced.php');
+require_once(dirname(dirname(__FILE__)) . '/inc/Doku_Indexer_Enhanced.php');
+
+
 /**
  * Update the Search Index from command line
  */
@@ -36,7 +58,7 @@ class EnhancedIndexerCLI extends DokuCLI {
      */
     protected function setup(DokuCLI_Options $options) {
         $options->setHelp(
-            'Updates the searchindex by indexing all new or changed pages. When the -c option is '.
+            'Updates the search index by indexing all new or changed pages. When the -c option is '.
             'given the index is cleared first.'
         );
 
@@ -45,46 +67,46 @@ class EnhancedIndexerCLI extends DokuCLI {
             'clear the index before updating',
             'c'
         );
-        
+
         $options->registerOption(
             'force',
             'force the index rebuilding, skip date check',
             'f'
         );
-        
+
         $options->registerOption(
             'namespace',
             'Only update items in namespace',
             'n',
             true // needs arg
         );
-        
+
         $options->registerOption(
             'quiet',
             'don\'t produce any output',
             'q'
         );
-        
+
         $options->registerOption(
             'id',
             'only update specific id',
             'i',
             true // needs arg
         );
-        
+
         $options->registerOption(
             'remove-locks',
             'remove any locks on the indexer',
             'l'
         );
-        
+
         $options->registerOption(
             'max-runs',
             'Restart after indexing n items',
             'r',
             true
         );
-        
+
         $options->registerOption(
             'start',
             'start at offset',
@@ -92,13 +114,13 @@ class EnhancedIndexerCLI extends DokuCLI {
             true
         );
     }
-    
-    
-    public function __destruct() 
+
+
+    public function __destruct()
     {
         $this->cleanup();
     }
-    
+
     private function cleanup()
     {
         if($this->clean == false) {
@@ -107,7 +129,7 @@ class EnhancedIndexerCLI extends DokuCLI {
             $this->quietecho("done\n");
             $this->clean = true;
         }
-        
+
         $this->removeLocks();
     }
 
@@ -127,13 +149,13 @@ class EnhancedIndexerCLI extends DokuCLI {
         $this->removeLocks = $options->getOpt('remove-locks', '');
         $this->maxRuns = $options->getOpt('max-runs', 0);
         $this->startOffset = $options->getOpt('start', 0);
-        
+
         $id = $options->getOpt('id');
-        
+
         if($this->removeLocks) {
             $this->removeLocks();
         }
-        
+
         if($id) {
             $this->index($id);
             $this->quietecho("done.\n");
@@ -145,7 +167,6 @@ class EnhancedIndexerCLI extends DokuCLI {
 
             $this->update();
         }
-        
     }
 
     /**
@@ -153,11 +174,11 @@ class EnhancedIndexerCLI extends DokuCLI {
      */
     function update() {
         global $conf;
+
         $data = array();
         if($this->lock() == false) {
             $this->error('unable to get lock, bailing');
             exit(1);
-            return;
         }
         $this->quietecho("Searching pages... ");
         if($this->namespace) {
@@ -171,49 +192,56 @@ class EnhancedIndexerCLI extends DokuCLI {
         $this->quietecho(count($data)." pages found.\n");
 
         $cnt = 0;
-        
-        
+
+
         $length = count($data);
         for($i=$this->startOffset; $i < $length; $i++) {
-            
+
             if(($this->index($idPrefix.$data[$i]['id']))) {
                 $cnt++;
                 $this->clean = false;
-            } 
-                    
+            }
+
             if($this->exit) {
                 exit();
             }
-            
-            if(memory_get_usage() > return_bytes(ini_get('memory_limit')) * 0.8) { 
+
+            if(memory_get_usage() > return_bytes(ini_get('memory_limit')) * 0.8) {
                 // we've used up 80% memory try again.
                 $this->error('Memory almost full, restarting');
                 $this->restart($i+1);
             }
-            
+
             if($this->maxRuns && $cnt >= $this->maxRuns) {
                 $this->error('Max runs reached '.$cnt.', restarting');
                 $this->restart($i+1);
             }
         }
     }
-    
+
     function restart($start = 0)
     {
         global $argv;
         $this->cleanup();
         $args = $argv;
         array_unshift($args, '-d', 'memory_limit='.ini_get('memory_limit'));
-        
+
         foreach($args as $key => $arg) {
             if($arg == '--clear' || $arg == '-c') {
                 $args[$key] = '--force';
             }
         }
-        
+
         array_push($args, '--start', $start);
-        
-        pcntl_exec($_SERVER['_'], $args);
+
+        // for running in a debugger
+        if (empty($_SERVER['_'])) {
+            pcntl_exec('/usr/bin/php', $args);
+        }
+        else {
+            pcntl_exec($_SERVER['_'], $args);
+        }
+
         exit();
     }
 
@@ -221,6 +249,7 @@ class EnhancedIndexerCLI extends DokuCLI {
      * Index the given page
      *
      * @param string $id
+     * @return bool
      */
     function index($id) {
         $this->quietecho("$id... ");
@@ -246,23 +275,22 @@ class EnhancedIndexerCLI extends DokuCLI {
             echo $msg;
         }
     }
-    
+
     /**
      * Lock the indexer.
      */
     protected function lock() {
         global $conf;
-        $status = true;
-        
+
         $lock = $conf['lockdir'].'/_enhanced_indexer.lock';
         if (!@mkdir($lock, $conf['dmode'])) {
             if(is_dir($lock) && $this->removeLocks) {
                 // looks like a stale lock - remove it
                 if (!@rmdir($lock)) {
-                    $status = "removing the stale lock failed";
+                    // removing the stale lock failed
                     return false;
                 } else {
-                    $status = "stale lock removed";
+                    // stale lock removed
                     return true;
                 }
             } else {
@@ -272,30 +300,30 @@ class EnhancedIndexerCLI extends DokuCLI {
         if (!empty($conf['dperm'])) {
             chmod($lock, $conf['dperm']);
         }
-        return $status;
+        return true;
     }
-    
+
     public function removeLocks()
     {
         global $conf;
-        
+
         $this->quietecho('clearing lock...');
         $return = true;
-        
+
         if(is_dir($conf['lockdir'].'/_enhanced_indexer.lock') && !rmdir($conf['lockdir'].'/_enhanced_indexer.lock')) {
             $this->error('failed to remove '.$conf['lockdir'].'/_enhanced_indexer.lock something is wrong');
             $return  = false;
         }
-        
+
         if(is_dir($conf['lockdir'].'/_indexer.lock') && !rmdir($conf['lockdir'].'/_indexer.lock')) {
             $this->error('failed to remove '.$conf['lockdir'].'/_indexer.lock something is wrong');
             $return  = false;
         }
-        $this->quietecho('done.\n');
-        
+        $this->quietecho("done.\n");
+
         return $return;
     }
-    
+
     public function sigInt()
     {
         $this->exit = true;
@@ -309,11 +337,11 @@ if(function_exists('pcntl_signal')) {
     // ensure things exit cleanly with ctrl+c
     declare(ticks = 10);
 
-    pcntl_signal(SIGINT, array($cli, 'sigInt'));  
+    pcntl_signal(SIGINT, array($cli, 'sigInt'));
     pcntl_signal(SIGTERM, array($cli, 'sigInt'));
 }
 
-$conf['cachetime'] = 60 * 60; // default is -1 which means cache isnt' used :(
+$conf['cachetime'] = 60 * 60; // default is -1 which means cache isn't used :(
 
 $cli->run();
 
