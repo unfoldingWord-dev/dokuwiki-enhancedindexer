@@ -165,26 +165,30 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
  *
  * Locking is handled internally.
  *
- * @param string        $page   name of the page to index
- * @param boolean       $verbose    print status messages
- * @param boolean       $force  force reindexing even when the index is up to date
+ * @param string    $page       name of the page to index
+ * @param boolean   $verbose    print status messages
+ * @param boolean   $force      force reindexing even when the index is up to date
  * @return boolean              the function completed successfully
  * @author Tom N Harris <tnharris@whoopdedo.org>
  */
 function enhanced_idx_addPage($page, $verbose=false, $force=false) {
+
     $idxtag = metaFN($page,'.indexed');
+
     // check if page was deleted but is still in the index
     if (!page_exists($page)) {
         if (!@file_exists($idxtag)) {
             if ($verbose) print("Indexer: $page does not exist, ignoring".DOKU_LF);
             return false;
         }
+
         $Indexer = enhanced_idx_get_indexer();
         $result = $Indexer->deletePage($page);
         if ($result === "locked") {
             if ($verbose) print("Indexer: locked".DOKU_LF);
             return false;
         }
+
         @unlink($idxtag);
         return $result;
     }
@@ -256,12 +260,14 @@ function enhanced_idx_addPage($page, $verbose=false, $force=false) {
         }
     }
 
-    if ($result)
+    if ($result) {
         io_saveFile(metaFN($page,'.indexed'), idx_get_version());
+    }
+
     if ($verbose) {
         print("Indexer: finished".DOKU_LF);
-        return true;
     }
+
     return $result;
 }
 
