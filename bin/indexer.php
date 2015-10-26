@@ -259,6 +259,7 @@ class EnhancedIndexerCLI extends DokuCLI {
             // this is a restart, count the lines in the existing temp file
             $this->quietecho("Finding last position... ");
             self::$totalPagesToIndex = self::get_line_count(self::$tempFileName);
+            $this->quietecho("done\n");
         }
 
         $cnt = 0;
