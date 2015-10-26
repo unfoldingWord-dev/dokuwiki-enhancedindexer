@@ -206,7 +206,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         }
 
         if($id) {
-            $this->index($id);
+            $this->index($id, 1, 1);
             $this->quietecho("done\n");
         } else {
 
@@ -230,8 +230,6 @@ class EnhancedIndexerCLI extends DokuCLI {
             exit(1);
         }
 
-        $this->quietecho("Searching pages... ");
-
         // are we indexing a single namespace or all files?
         if($this->namespace) {
             $dir      = $conf['datadir'] . DS . str_replace(':', DS, $this->namespace);
@@ -248,12 +246,20 @@ class EnhancedIndexerCLI extends DokuCLI {
             if(file_exists(self::$tempFileName)) {
                 self::$tempFileName .= 'b';
             }
-        }
 
-        // we aren't going to use $data, but the search function needs it
-        $data = array();
-        search($data, $dir, 'EnhancedIndexerCLI::save_search_allpages', array('skipacl' => true));
-        $this->quietecho(self::$totalPagesToIndex . " pages found.\n");
+            $this->quietecho("Searching pages... ");
+
+            // we aren't going to use $data, but the search function needs it
+            $data = array();
+            search($data, $dir, 'EnhancedIndexerCLI::save_search_allpages', array('skipacl' => true));
+            $this->quietecho(self::$totalPagesToIndex . " pages found.\n");
+        }
+        else {
+
+            // this is a restart, count the lines in the existing temp file
+            $this->quietecho("Finding last position... ");
+            self::$totalPagesToIndex = self::get_line_count(self::$tempFileName);
+        }
 
         $cnt = 0;
 
@@ -277,7 +283,7 @@ class EnhancedIndexerCLI extends DokuCLI {
                 $pageId = $this->temp_file->current();
 
                 // index this page, if not done already
-                if(($this->index($idPrefix . $pageId))) {
+                if(($this->index($idPrefix . $pageId, $i + 1, self::$totalPagesToIndex))) {
                     $cnt++;
                     $this->clean = false;
                 }
@@ -343,10 +349,12 @@ class EnhancedIndexerCLI extends DokuCLI {
      * Index the given page
      *
      * @param string $id
+     * @param        $position
+     * @param        $total
      * @return bool
      */
-    function index($id) {
-        $this->quietecho("$id... ");
+    function index($id, $position, $total) {
+        $this->quietecho("{$position} of {$total}: {$id}... ");
         return enhanced_idx_addPage($id, !$this->quiet, $this->force || $this->clear);
     }
 
@@ -468,6 +476,26 @@ class EnhancedIndexerCLI extends DokuCLI {
         self::$totalPagesToIndex++;
 
         return true;
+    }
+
+    /**
+     * This is ugly, but it seems to be the best way to get the number of lines in a file
+     * @param $file_name
+     * @return int
+     */
+    private static function get_line_count($file_name) {
+
+        $line_count = 0;
+        $handle = fopen($file_name, "r");
+        while(!feof($handle)){
+            /** @noinspection PhpUnusedLocalVariableInspection */
+            $line = fgets($handle);
+            $line_count++;
+        }
+
+        fclose($handle);
+
+        return $line_count;
     }
 }
 
