@@ -15,6 +15,7 @@
  *   -n <s>, --namespace <s>  Only update items in namespace.
  *   -q, --quiet              Don't produce any output.
  *   -s <n>, --start <n>      Start at offset.
+ *   -e <n>, --end <n>        End at offset.
  *   --no-colors              Don't use any colors in output. Useful when piping output to other tools or files.
  *   -t <s> --temp-file <s>   Existing temp file to use.
  */
@@ -153,6 +154,13 @@ class EnhancedIndexerCLI extends DokuCLI {
         );
 
         $options->registerOption(
+            'end',
+            'end at offset',
+            'e',
+            true
+        );
+
+        $options->registerOption(
             'temp-file',
             'Existing temp file to use.',
             't',
@@ -198,6 +206,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         $this->maxRuns      = $options->getOpt('max-runs', 0);
         $this->startOffset  = $options->getOpt('start', 0);
         self::$tempFileName = $options->getOpt('temp-file', '');
+        self::$totalPagesToIndex = $options->getOpt('end', 0);
 
         $id = $options->getOpt('id');
 
@@ -253,13 +262,6 @@ class EnhancedIndexerCLI extends DokuCLI {
             $data = array();
             search($data, $dir, 'EnhancedIndexerCLI::save_search_allpages', array('skipacl' => true));
             $this->quietecho(self::$totalPagesToIndex . " pages found.\n");
-        }
-        else {
-
-            // this is a restart, count the lines in the existing temp file
-            $this->quietecho("Finding last position... ");
-            self::$totalPagesToIndex = self::get_line_count(self::$tempFileName);
-            $this->quietecho("done\n");
         }
 
         $cnt = 0;
@@ -336,6 +338,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         }
 
         array_push($args, '--start', $start);
+        array_push($args, '--end', self::$totalPagesToIndex);
         array_push($args, '--temp-file', self::$tempFileName);
 
         // for running in a debugger
@@ -477,26 +480,6 @@ class EnhancedIndexerCLI extends DokuCLI {
         self::$totalPagesToIndex++;
 
         return true;
-    }
-
-    /**
-     * This is ugly, but it seems to be the best way to get the number of lines in a file
-     * @param $file_name
-     * @return int
-     */
-    private static function get_line_count($file_name) {
-
-        $line_count = 0;
-        $handle = fopen($file_name, "r");
-        while(!feof($handle)){
-            /** @noinspection PhpUnusedLocalVariableInspection */
-            $line = fgets($handle);
-            $line_count++;
-        }
-
-        fclose($handle);
-
-        return $line_count;
     }
 }
 
