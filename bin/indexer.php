@@ -19,15 +19,10 @@
  *   -t <s> --temp-file <s>   Existing temp file to use.
  */
 
-if(!defined('DOKU_INC')) {
-    define('DOKU_INC', realpath(dirname(__FILE__) . '/../../../../') . '/');
-}
-
-if(!defined('DS')) {
-    define('DS', DIRECTORY_SEPARATOR);
-}
-
+if(!defined('DOKU_INC')) define('DOKU_INC', realpath(dirname(__FILE__) . '/../../../../') . '/');
+if(!defined('DS')) define('DS', DIRECTORY_SEPARATOR);
 define('NOSESSION', 1);
+if(!defined('ONE_MEGABYTE')) define('ONE_MEGABYTE', 1048576);
 
 /** @noinspection PhpIncludeInspection */
 require_once(DOKU_INC . 'inc/init.php');
@@ -39,9 +34,34 @@ if(class_exists('DokuCLI') == false) {
 
 require_once(dirname(dirname(__FILE__)) . '/inc/Doku_Indexer_Enhanced.php');
 
-// if memory limit is not set, or is less than 256MB, increase it to 256MB
-if(return_bytes(ini_get('memory_limit')) < (1048576 * 256)) {
-    ini_set('memory_limit', '256M');
+/**
+ * Converts memory size string into number of bytes
+ * @param $size_str
+ * @return int
+ */
+function return_bytes($size_str) {
+    switch(substr($size_str, -1)) {
+        case 'K':
+        case 'k':
+            return (int) $size_str * 1024;
+        case 'M':
+        case 'm':
+            return (int) $size_str * ONE_MEGABYTE;
+        case 'G':
+        case 'g':
+            return (int) $size_str * ONE_MEGABYTE * 1024;
+        default:
+            if(is_numeric($size_str)) {
+                return (int) $size_str;
+            } else {
+                return $size_str;
+            }
+    }
+}
+
+// if memory limit is not set, or is less than 512MB, increase it to 512MB
+if(return_bytes(ini_get('memory_limit')) < (ONE_MEGABYTE * 512)) {
+    ini_set('memory_limit', '512M');
 }
 
 /**
@@ -267,8 +287,8 @@ class EnhancedIndexerCLI extends DokuCLI {
                     break;
                 }
 
-                if(memory_get_usage() > return_bytes(ini_get('memory_limit')) * 0.8) {
-                    // we've used up 80% memory try again.
+                // restart when memory usage exceeds 256M
+                if(memory_get_usage() > (ONE_MEGABYTE * 256)) {
                     $this->error('Memory almost full, resetting');
                     $this->restart($i + 1);
                 }
@@ -285,7 +305,7 @@ class EnhancedIndexerCLI extends DokuCLI {
                 unset($this->temp_file);
             }
         } catch(Exception $e) {
-            $this->error($e->getMessage());
+            $this->error("\n" . $e->getMessage());
         }
 
         // remove the temp file
@@ -465,23 +485,3 @@ if(function_exists('pcntl_signal')) {
 $conf['cachetime'] = 60 * 60; // default is -1 which means cache isn't used :(
 
 $cli->run();
-
-function return_bytes($size_str) {
-    switch(substr($size_str, -1)) {
-        case 'M':
-        case 'm':
-            return (int) $size_str * 1048576;
-        case 'K':
-        case 'k':
-            return (int) $size_str * 1024;
-        case 'G':
-        case 'g':
-            return (int) $size_str * 1073741824;
-        default:
-            if(is_numeric($size_str)) {
-                return (int) $size_str;
-            } else {
-                return $size_str;
-            }
-    }
-}
