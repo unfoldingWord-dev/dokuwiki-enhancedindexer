@@ -73,7 +73,7 @@ class EnhancedIndexerCLI extends DokuCLI {
     private $quiet = false;
     private $clear = false;
     private $force = false;
-    private $namespace = '';
+    private static $namespace = '';
     private $removeLocks = false;
     private $exit = false;
     private $clean = true;
@@ -88,6 +88,8 @@ class EnhancedIndexerCLI extends DokuCLI {
     // save the list of files to be indexed in this file instead of an array to reduce memory consumption
     private static $tempFileName;
     private static $totalPagesToIndex = 0;
+    private static $maxPagesToIndex = 2000;
+
 
     /**
      * Register options and arguments on the given $options object
@@ -174,9 +176,9 @@ class EnhancedIndexerCLI extends DokuCLI {
 
     private function cleanup() {
         if($this->clean == false) {
-            $this->quietecho('Saving Indexes...');
+            $this->quiet_echo('Saving Indexes...');
             enhanced_idx_get_indexer()->flushIndexes();
-            $this->quietecho("done\n");
+            $this->quiet_echo("done\n");
             $this->clean = true;
         }
 
@@ -201,7 +203,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         $this->clear        = $options->getOpt('clear');
         $this->quiet        = $options->getOpt('quiet');
         $this->force        = $options->getOpt('force');
-        $this->namespace    = $options->getOpt('namespace', '');
+        self::$namespace    = $options->getOpt('namespace', '');
         $this->removeLocks  = $options->getOpt('remove-locks', '');
         $this->maxRuns      = $options->getOpt('max-runs', 0);
         $this->startOffset  = $options->getOpt('start', 0);
@@ -216,11 +218,11 @@ class EnhancedIndexerCLI extends DokuCLI {
 
         if($id) {
             $this->index($id, 1, 1);
-            $this->quietecho("done\n");
+            $this->quiet_echo("done\n");
         } else {
 
             if($this->clear) {
-                $this->clearindex();
+                $this->clear_index();
             }
 
             $this->update();
@@ -240,9 +242,9 @@ class EnhancedIndexerCLI extends DokuCLI {
         }
 
         // are we indexing a single namespace or all files?
-        if($this->namespace) {
-            $dir      = $conf['datadir'] . DS . str_replace(':', DS, $this->namespace);
-            $idPrefix = $this->namespace . ':';
+        if(self::$namespace) {
+            $dir      = $conf['datadir'] . DS . str_replace(':', DS, self::$namespace);
+            $idPrefix = self::$namespace . ':';
         } else {
             $dir      = $conf['datadir'];
             $idPrefix = '';
@@ -256,12 +258,17 @@ class EnhancedIndexerCLI extends DokuCLI {
                 self::$tempFileName .= 'b';
             }
 
-            $this->quietecho("Searching pages... ");
+            $this->quiet_echo("Searching pages... ");
 
             // we aren't going to use $data, but the search function needs it
             $data = array();
             search($data, $dir, 'EnhancedIndexerCLI::save_search_allpages', array('skipacl' => true));
-            $this->quietecho(self::$totalPagesToIndex . " pages found.\n");
+            $this->quiet_echo(self::$totalPagesToIndex . " pages found\n");
+        }
+
+        if(!is_file(self::$tempFileName)) {
+            $this->quiet_echo("No files found that need indexed\n");
+            return;
         }
 
         $cnt = 0;
@@ -319,9 +326,9 @@ class EnhancedIndexerCLI extends DokuCLI {
 
         // remove the temp file
         if(is_file(self::$tempFileName)) {
-            $this->quietecho("Removing temp file... ");
+            $this->quiet_echo("Removing temp file... ");
             unlink(self::$tempFileName);
-            $this->quietecho("done\n");
+            $this->quiet_echo("done\n");
         }
     }
 
@@ -358,17 +365,17 @@ class EnhancedIndexerCLI extends DokuCLI {
      * @return bool
      */
     function index($id, $position, $total) {
-        $this->quietecho("{$position} of {$total}: {$id}... ");
+        $this->quiet_echo("{$position} of {$total}: {$id}... ");
         return enhanced_idx_addPage($id, !$this->quiet, $this->force || $this->clear);
     }
 
     /**
      * Clear all index files
      */
-    function clearindex() {
-        $this->quietecho("Clearing index... ");
+    private function clear_index() {
+        $this->quiet_echo("Clearing index... ");
         enhanced_idx_get_indexer()->clear();
-        $this->quietecho("done\n");
+        $this->quiet_echo("done\n");
     }
 
     /**
@@ -376,7 +383,7 @@ class EnhancedIndexerCLI extends DokuCLI {
      *
      * @param string $msg
      */
-    function quietecho($msg) {
+    private function quiet_echo($msg) {
         if(!$this->quiet) {
             echo $msg;
         }
@@ -412,7 +419,7 @@ class EnhancedIndexerCLI extends DokuCLI {
     public function removeLocks() {
         global $conf;
 
-        $this->quietecho('clearing lock...');
+        $this->quiet_echo('clearing lock...');
         $return = true;
 
         if(is_dir($conf['lockdir'] . '/_enhanced_indexer.lock') && !rmdir($conf['lockdir'] . '/_enhanced_indexer.lock')) {
@@ -424,7 +431,7 @@ class EnhancedIndexerCLI extends DokuCLI {
             $this->error('failed to remove ' . $conf['lockdir'] . '/_indexer.lock something is wrong');
             $return = false;
         }
-        $this->quietecho("done\n");
+        $this->quiet_echo("done\n");
 
         return $return;
     }
@@ -451,6 +458,10 @@ class EnhancedIndexerCLI extends DokuCLI {
     public static function save_search_allpages(/** @noinspection PhpUnusedParameterInspection */
         &$data, $base, $file, $type, $lvl, $opts) {
 
+        if(self::$totalPagesToIndex >= self::$maxPagesToIndex) {
+            return false;
+        }
+
         if(!empty($opts['depth'])) {
             $parts = explode('/', ltrim($file, '/'));
             if(($type == 'd' && count($parts) >= $opts['depth'])
@@ -472,12 +483,36 @@ class EnhancedIndexerCLI extends DokuCLI {
 
         $pathId = pathID($file);
 
+        // skip if already indexed
+        if(!self::needs_indexed($pathId)) {
+            return true;
+        }
+
         if(!$opts['skipacl'] && auth_quickaclcheck($pathId) < AUTH_READ) {
             return false;
         }
 
         file_put_contents(self::$tempFileName, "$pathId\n", FILE_APPEND);
         self::$totalPagesToIndex++;
+
+        return true;
+    }
+
+    private static function needs_indexed($page) {
+
+        if(empty(self::$namespace)) {
+            $idx_tag = metaFN($page,'.indexed');
+        }
+        else {
+            $idx_tag = metaFN(self::$namespace . ':' . $page,'.indexed');
+        }
+
+        if(trim(io_readFile($idx_tag)) == idx_get_version()){
+            $last = @filemtime($idx_tag);
+            if($last > @filemtime(wikiFN($page))){
+                return false;
+            }
+        }
 
         return true;
     }
