@@ -9,15 +9,11 @@
  * Options:
  *   -h, --help               Display this help screen and exit immediately.
  *   -c, --clear              Clear the index before updating.
- *   -f, --force              Force the index rebuilding, skip date check.
- *   -i <s>, --id <s>         Only update specific id.
- *   -r <n>, --max-runs <n>   Restart after indexing n items.
  *   -n <s>, --namespace <s>  Only update items in namespace.
+ *   -i <s>, --id <s>         Only update specific id.
  *   -q, --quiet              Don't produce any output.
- *   -s <n>, --start <n>      Start at offset.
- *   -e <n>, --end <n>        End at offset.
+ *   -r <n>, --max-runs <n>   Restart after indexing n items. [not used]
  *   --no-colors              Don't use any colors in output. Useful when piping output to other tools or files.
- *   -t <s> --temp-file <s>   Existing temp file to use.
  */
 
 if(!defined('DOKU_INC')) define('DOKU_INC', realpath(dirname(__FILE__) . '/../../../../') . '/');
@@ -65,6 +61,7 @@ if(return_bytes(ini_get('memory_limit')) < (ONE_MEGABYTE * 512)) {
     ini_set('memory_limit', '512M');
 }
 
+
 /**
  * Update the Search Index from command line
  */
@@ -72,22 +69,13 @@ class EnhancedIndexerCLI extends DokuCLI {
 
     private $quiet = false;
     private $clear = false;
-    private $force = false;
     private $namespace = '';
     private $removeLocks = false;
     private $exit = false;
     private $clean = true;
     private $maxRuns = 0;
-    private $startOffset = 0;
+    private $totalPagesIndexed = 1;
 
-    /**
-     * @var SplFileObject
-     */
-    private $temp_file;
-
-    // save the list of files to be indexed in this file instead of an array to reduce memory consumption
-    private static $tempFileName;
-    private static $totalPagesToIndex = 0;
 
     /**
      * Register options and arguments on the given $options object
@@ -105,12 +93,6 @@ class EnhancedIndexerCLI extends DokuCLI {
             'clear',
             'clear the index before updating',
             'c'
-        );
-
-        $options->registerOption(
-            'force',
-            'force the index rebuilding, skip date check',
-            'f'
         );
 
         $options->registerOption(
@@ -145,27 +127,6 @@ class EnhancedIndexerCLI extends DokuCLI {
             'r',
             true
         );
-
-        $options->registerOption(
-            'start',
-            'start at offset',
-            's',
-            true
-        );
-
-        $options->registerOption(
-            'end',
-            'end at offset',
-            'e',
-            true
-        );
-
-        $options->registerOption(
-            'temp-file',
-            'Existing temp file to use.',
-            't',
-            true
-        );
     }
 
     public function __destruct() {
@@ -174,9 +135,9 @@ class EnhancedIndexerCLI extends DokuCLI {
 
     private function cleanup() {
         if($this->clean == false) {
-            $this->quietecho('Saving Indexes...');
+            $this->quiet_echo('Saving Indexes...');
             enhanced_idx_get_indexer()->flushIndexes();
-            $this->quietecho("done\n");
+            $this->quiet_echo("done\n");
             $this->clean = true;
         }
 
@@ -198,15 +159,11 @@ class EnhancedIndexerCLI extends DokuCLI {
      * @return void
      */
     protected function main(DokuCLI_Options $options) {
-        $this->clear        = $options->getOpt('clear');
-        $this->quiet        = $options->getOpt('quiet');
-        $this->force        = $options->getOpt('force');
-        $this->namespace    = $options->getOpt('namespace', '');
-        $this->removeLocks  = $options->getOpt('remove-locks', '');
-        $this->maxRuns      = $options->getOpt('max-runs', 0);
-        $this->startOffset  = $options->getOpt('start', 0);
-        self::$tempFileName = $options->getOpt('temp-file', '');
-        self::$totalPagesToIndex = $options->getOpt('end', 0);
+        $this->clear       = $options->getOpt('clear');
+        $this->quiet       = $options->getOpt('quiet');
+        $this->namespace   = $options->getOpt('namespace', '');
+        $this->removeLocks = $options->getOpt('remove-locks', '');
+        $this->maxRuns     = $options->getOpt('max-runs', 10000);
 
         $id = $options->getOpt('id');
 
@@ -215,12 +172,12 @@ class EnhancedIndexerCLI extends DokuCLI {
         }
 
         if($id) {
-            $this->index($id, 1, 1);
-            $this->quietecho("done\n");
+            $this->index($id, $this->wikiFN($id));
+            $this->quiet_echo("done\n");
         } else {
 
             if($this->clear) {
-                $this->clearindex();
+                $this->clear_index();
             }
 
             $this->update();
@@ -241,91 +198,52 @@ class EnhancedIndexerCLI extends DokuCLI {
 
         // are we indexing a single namespace or all files?
         if($this->namespace) {
-            $dir      = $conf['datadir'] . DS . str_replace(':', DS, $this->namespace);
-            $idPrefix = $this->namespace . ':';
-        } else {
-            $dir      = $conf['datadir'];
-            $idPrefix = '';
+            $dir = $conf['datadir'] . DS . str_replace(':', DS, $this->namespace);
+        }
+        else {
+            $dir = $conf['datadir'];
         }
 
-        // get a temp file name to store the list of files to index
-        if(empty(self::$tempFileName)) {
-
-            self::$tempFileName = sys_get_temp_dir() . '/EnhancedIndexer-' . microtime(true);
-            if(file_exists(self::$tempFileName)) {
-                self::$tempFileName .= 'b';
-            }
-
-            $this->quietecho("Searching pages... ");
-
-            // we aren't going to use $data, but the search function needs it
-            $data = array();
-            search($data, $dir, 'EnhancedIndexerCLI::save_search_allpages', array('skipacl' => true));
-            $this->quietecho(self::$totalPagesToIndex . " pages found.\n");
-        }
-
-        $cnt = 0;
+        $offset = strlen($dir) + 1;
 
         try {
 
-            // we are using the SplFileObject so we can read one line without loading the whole file
-            $this->temp_file = new SplFileObject(self::$tempFileName);
+            $dir_iterator = new RecursiveDirectoryIterator($dir);
+            $file_iterator = new RecursiveIteratorIterator($dir_iterator);
 
-            // this flag tells the SplFileObject to remove the \n from the end of each line it reads
-            $this->temp_file->setFlags(SplFileObject::DROP_NEW_LINE);
+            /** @var SplFileInfo $file */
+            foreach($file_iterator as $file) {
 
-            for($i = $this->startOffset; $i < self::$totalPagesToIndex; $i++) {
-
-                // make sure the file handle is still open
-                if(!$this->temp_file->valid()) {
-                    break;
-                }
-
-                // move to the next line and read the page id
-                $this->temp_file->seek($i);
-                $pageId = $this->temp_file->current();
-
-                // index this page, if not done already
-                if(($this->index($idPrefix . $pageId, $i + 1, self::$totalPagesToIndex))) {
-                    $cnt++;
-                    $this->clean = false;
-                }
+                if(substr($file->getFilename(), -4) !== '.txt') continue;
 
                 // used to exit cleanly if ctrl+c is detected
                 if($this->exit) {
                     break;
                 }
 
-                // restart when memory usage exceeds 256M
-                if(memory_get_usage() > (ONE_MEGABYTE * 256)) {
-                    $this->error('Memory almost full, resetting');
-                    $this->restart($i + 1);
+                $fullFileName = $file->getPathname();
+
+                $pathId = pathID(substr($fullFileName, $offset));
+
+                // skip if already indexed
+                if($this->needs_indexed($pathId, $fullFileName)) {
+                    $this->index($pathId, $fullFileName);
+                    $this->totalPagesIndexed++;
                 }
 
-                if($this->maxRuns && $cnt >= $this->maxRuns) {
-                    $this->error('Max runs reached ' . $cnt . ', restarting');
-                    $this->restart($i + 1);
+                // restart if the maxRuns number of pages have been indexed
+                if (!empty($this->maxRuns) && $this->totalPagesIndexed > $this->maxRuns) {
+                    $this->restart();
+                    break;
                 }
             }
-
-            // release the temp file
-            if(!empty($this->temp_file)) {
-                $this->temp_file = null;
-                unset($this->temp_file);
-            }
-        } catch(Exception $e) {
-            $this->error("\n" . $e->getMessage());
         }
-
-        // remove the temp file
-        if(is_file(self::$tempFileName)) {
-            $this->quietecho("Removing temp file... ");
-            unlink(self::$tempFileName);
-            $this->quietecho("done\n");
+        catch(Exception $e) {
+            $this->error("\n" . $e->getMessage());
         }
     }
 
-    function restart($start = 0) {
+    function restart() {
         global $argv;
         $this->cleanup();
         $args = $argv;
@@ -333,13 +251,14 @@ class EnhancedIndexerCLI extends DokuCLI {
 
         foreach($args as $key => $arg) {
             if($arg == '--clear' || $arg == '-c') {
-                $args[$key] = '--force';
+                unset($args[$key]);
+                break;
             }
         }
 
-        array_push($args, '--start', $start);
-        array_push($args, '--end', self::$totalPagesToIndex);
-        array_push($args, '--temp-file', self::$tempFileName);
+        if (!empty($this->namespace)) {
+            array_push($args, '-n', $this->namespace);
+        }
 
         // for running in a debugger
         if(empty($_SERVER['_'])) {
@@ -353,22 +272,46 @@ class EnhancedIndexerCLI extends DokuCLI {
      * Index the given page
      *
      * @param string $id
-     * @param        $position
-     * @param        $total
+     * @param string $fileName
      * @return bool
      */
-    function index($id, $position, $total) {
-        $this->quietecho("{$position} of {$total}: {$id}... ");
-        return enhanced_idx_addPage($id, !$this->quiet, $this->force || $this->clear);
+    private function index($id, $fileName) {
+
+        if($this->namespace) {
+            $id = $this->namespace . ':' . $id;
+        }
+
+        $this->quiet_echo("{$this->totalPagesIndexed}: {$id}... ");
+        return $this->enhanced_idx_addPage($id, !$this->quiet, $fileName);
     }
 
     /**
      * Clear all index files
      */
-    function clearindex() {
-        $this->quietecho("Clearing index... ");
+    private function clear_index() {
+        global $conf;
+
+        $this->quiet_echo("Clearing index... ");
         enhanced_idx_get_indexer()->clear();
-        $this->quietecho("done\n");
+
+        // remove the *.indexed files for the pages
+        $meta_dir = $conf['metadir'];
+
+        if(!empty($this->namespace)) {
+            $meta_dir .= DS . $this->namespace;
+        }
+
+        $dir_iterator = new RecursiveDirectoryIterator($meta_dir);
+        $file_iterator = new RecursiveIteratorIterator($dir_iterator);
+
+        foreach($file_iterator as $file) {
+
+            if(substr($file->getFilename(), -8) !== '.indexed') continue;
+
+            unlink($file->getPathname());
+        }
+
+        $this->quiet_echo("done\n");
     }
 
     /**
@@ -376,7 +319,7 @@ class EnhancedIndexerCLI extends DokuCLI {
      *
      * @param string $msg
      */
-    function quietecho($msg) {
+    private function quiet_echo($msg) {
         if(!$this->quiet) {
             echo $msg;
         }
@@ -412,7 +355,7 @@ class EnhancedIndexerCLI extends DokuCLI {
     public function removeLocks() {
         global $conf;
 
-        $this->quietecho('clearing lock...');
+        $this->quiet_echo('clearing lock...');
         $return = true;
 
         if(is_dir($conf['lockdir'] . '/_enhanced_indexer.lock') && !rmdir($conf['lockdir'] . '/_enhanced_indexer.lock')) {
@@ -424,7 +367,7 @@ class EnhancedIndexerCLI extends DokuCLI {
             $this->error('failed to remove ' . $conf['lockdir'] . '/_indexer.lock something is wrong');
             $return = false;
         }
-        $this->quietecho("done\n");
+        $this->quiet_echo("done\n");
 
         return $return;
     }
@@ -433,54 +376,321 @@ class EnhancedIndexerCLI extends DokuCLI {
         $this->exit = true;
     }
 
-    /**
-     * Just lists all documents
-     *
-     * $opts['depth']   recursion level, 0 for all
-     * $opts['hash']    do md5 sum of content?
-     * $opts['skipacl'] list everything regardless of ACL
-     *
-     * @param $data
-     * @param $base
-     * @param $file
-     * @param $type
-     * @param $lvl
-     * @param $opts
-     * @return bool
-     */
-    public static function save_search_allpages(/** @noinspection PhpUnusedParameterInspection */
-        &$data, $base, $file, $type, $lvl, $opts) {
+    private function needs_indexed($pageId, $pageFile) {
 
-        if(!empty($opts['depth'])) {
-            $parts = explode('/', ltrim($file, '/'));
-            if(($type == 'd' && count($parts) >= $opts['depth'])
-                || ($type != 'd' && count($parts) > $opts['depth'])
-            ) {
-                return false; // depth reached
+        if(empty($this->namespace)) {
+            $idx_tag = $this->metaFN($pageId,'.indexed');
+        }
+        else {
+            $idx_tag = $this->metaFN($this->namespace . ':' . $pageId,'.indexed');
+        }
+
+        if(trim(io_readFile($idx_tag)) == idx_get_version()){
+            $last = @filemtime($idx_tag);
+            if($last > @filemtime($pageFile)){
+                return false;
             }
         }
 
-        //we do nothing with directories
-        if($type == 'd') {
-            return true;
+        return true;
+    }
+
+    /**
+     * returns the full path to the meta file specified by ID and extension
+     *
+     * @author Steven Danz <steven-danz@kc.rr.com>
+     *
+     * @param string $id   page id
+     * @param string $ext  file extension
+     * @return string full path
+     */
+    function metaFN($id, $ext){
+        global $conf;
+        $id = $this->cleanID($id);
+        $id = str_replace(':','/',$id);
+        $fn = $conf['metadir'].'/'.utf8_encodeFN($id).$ext;
+        return $fn;
+    }
+
+    /**
+     * Remove unwanted chars from ID
+     *
+     * Cleans a given ID to only use allowed characters. Accented characters are
+     * converted to unaccented ones
+     *
+     * @author Andreas Gohr <andi@splitbrain.org>
+     *
+     * @param  string  $raw_id    The pageid to clean
+     * @param  boolean $ascii     Force ASCII
+     * @return string cleaned id
+     */
+    function cleanID($raw_id,$ascii=false){
+        global $conf;
+        static $sepcharpat = null;
+
+        $sepchar = $conf['sepchar'];
+        if($sepcharpat == null) // build string only once to save clock cycles
+            $sepcharpat = '#\\'.$sepchar.'+#';
+
+        $id = trim((string)$raw_id);
+        $id = utf8_strtolower($id);
+
+        //alternative namespace seperator
+        if($conf['useslash']){
+            $id = strtr($id,';/','::');
+        }else{
+            $id = strtr($id,';/',':'.$sepchar);
         }
 
-        //only search txt files
-        if(substr($file, -4) != '.txt') {
-            return true;
+        if($conf['deaccent'] == 2 || $ascii) $id = utf8_romanize($id);
+        if($conf['deaccent'] || $ascii) $id = utf8_deaccent($id,-1);
+
+        //remove specials
+        $id = utf8_stripspecials($id,$sepchar,'\*');
+
+        if($ascii) $id = utf8_strip($id);
+
+        //clean up
+        $id = preg_replace($sepcharpat,$sepchar,$id);
+        $id = preg_replace('#:+#',':',$id);
+        $id = trim($id,':._-');
+        $id = preg_replace('#:[:\._\-]+#',':',$id);
+        $id = preg_replace('#[:\._\-]+:#',':',$id);
+
+        return($id);
+    }
+
+    /**
+     * Adds/updates the search index for the given page
+     *
+     * Locking is handled internally.
+     *
+     * @param string  $page    name of the page to index
+     * @param boolean $verbose print status messages
+     * @param         $fileName
+     * @return bool the function completed successfully
+     * @author Tom N Harris <tnharris@whoopdedo.org>
+     */
+    function enhanced_idx_addPage($page, $verbose=false, $fileName) {
+
+        $idx_file = $this->metaFN($page,'.indexed');
+
+        $indexenabled = $this->p_get_metadata($page, 'internal index', $fileName);
+        if ($indexenabled === false) {
+            $result = false;
+            if (@file_exists($idx_file)) {
+                $Indexer = enhanced_idx_get_indexer();
+                $result = $Indexer->deletePage($page);
+                if ($result === "locked") {
+                    if ($verbose) print("Indexer: locked".DOKU_LF);
+                    return false;
+                }
+                @unlink($idx_file);
+            }
+            if ($verbose) print("Indexer: index disabled for $page".DOKU_LF);
+            return $result;
         }
 
-        $pathId = pathID($file);
+        $Indexer = enhanced_idx_get_indexer();
+        $pid = $Indexer->getPID($page);
+        if ($pid === false) {
+            if ($verbose) print("Indexer: getting the PID failed for $page".DOKU_LF);
+            return false;
+        }
+        $body = '';
+        $metadata = array();
+        $metadata['title'] = p_get_metadata($page, 'title', METADATA_RENDER_UNLIMITED);
+        if (($references = p_get_metadata($page, 'relation references', METADATA_RENDER_UNLIMITED)) !== null)
+            $metadata['relation_references'] = array_keys($references);
+        else
+            $metadata['relation_references'] = array();
 
-        if(!$opts['skipacl'] && auth_quickaclcheck($pathId) < AUTH_READ) {
+        if (($media = p_get_metadata($page, 'relation media', METADATA_RENDER_UNLIMITED)) !== null)
+            $metadata['relation_media'] = array_keys($media);
+        else
+            $metadata['relation_media'] = array();
+
+        $data = compact('page', 'body', 'metadata', 'pid');
+        $evt = new Doku_Event('INDEXER_PAGE_ADD', $data);
+        if ($evt->advise_before()) $data['body'] = $data['body'] . " " . rawWiki($page);
+        $evt->advise_after();
+        unset($evt);
+        extract($data);
+
+        $result = $Indexer->addPageWords($page, $body);
+        if ($result === "locked") {
+            if ($verbose) print("Indexer: locked".DOKU_LF);
             return false;
         }
 
-        file_put_contents(self::$tempFileName, "$pathId\n", FILE_APPEND);
-        self::$totalPagesToIndex++;
+        if ($result) {
+            $result = $Indexer->addMetaKeys($page, $metadata);
+            if ($result === "locked") {
+                if ($verbose) print("Indexer: locked".DOKU_LF);
+                return false;
+            }
+        }
 
-        return true;
+        if ($result) {
+            io_saveFile($this->metaFN($page,'.indexed'), idx_get_version());
+        }
+
+        if ($verbose) {
+            print("Indexer: finished".DOKU_LF);
+        }
+
+        return $result;
     }
+
+    /**
+     * returns the metadata of a page
+     *
+     * @param string $id     The id of the page the metadata should be returned from
+     * @param string $key    The key of the metdata value that shall be read (by default everything) - separate hierarchies by " " like "date created"
+     * @param        $pageFileName
+     * @return mixed The requested metadata fields
+     *
+     * @author Esther Brunner <esther@kaffeehaus.ch>
+     * @author Michael Hamann <michael@content-space.de>
+     */
+    function p_get_metadata($id, $key='', $pageFileName){
+
+        $metaFileName = $this->metaFN($id, '.meta');
+        $meta = $this->p_read_metadata($metaFileName);
+
+        if (!file_exists($metaFileName) || @filemtime($pageFileName) > @filemtime($metaFileName)) {
+
+            $old_meta = $meta;
+            $meta = $this->p_render_metadata($id, $meta, $pageFileName);
+
+            // only update the file when the metadata has been changed
+            if ($meta != $old_meta) {
+                $ableToSave = io_saveFile($metaFileName, serialize($meta));
+
+                if (!$ableToSave) {
+                    $this->quiet_echo('Unable to save metadata file. Hint: disk full; file permissions; safe_mode setting.');
+                }
+            }
+        }
+
+        $val = $meta['current'];
+
+        // filter by $key
+        foreach(preg_split('/\s+/', $key, 2, PREG_SPLIT_NO_EMPTY) as $cur_key) {
+            if (!isset($val[$cur_key])) {
+                return null;
+            }
+            $val = $val[$cur_key];
+        }
+        return $val;
+    }
+
+    /**
+     * read the metadata from source/cache for $id
+     * (internal use only - called by p_get_metadata & p_set_metadata)
+     *
+     * @author   Christopher Smith <chris@jalakai.co.uk>
+     *
+     * @param $fileName
+     * @return array metadata
+     *
+     */
+    function p_read_metadata($fileName) {
+
+        $meta = file_exists($fileName) ? unserialize(io_readFile($fileName, false)) : array('current'=>array(),'persistent'=>array());
+
+        return $meta;
+    }
+
+    /**
+     * returns the full path to the datafile specified by ID and optional revision
+     *
+     * The filename is URL encoded to protect Unicode chars
+     *
+     * @param  $raw_id  string   id of wikipage
+     * @param  $rev     int|string   page revision, empty string for current
+     * @param  $clean   bool     flag indicating that $raw_id should be cleaned.  Only set to false
+     *                           when $id is guaranteed to have been cleaned already.
+     * @return string full path
+     *
+     * @author Andreas Gohr <andi@splitbrain.org>
+     */
+    function wikiFN($raw_id,$rev='',$clean=true){
+        global $conf;
+
+        $id = $raw_id;
+
+        if ($clean) $id = $this->cleanID($id);
+        $id = str_replace(':','/',$id);
+        if(empty($rev)){
+            $fn = $conf['datadir'].'/'.utf8_encodeFN($id).'.txt';
+        }else{
+            $fn = $conf['olddir'].'/'.utf8_encodeFN($id).'.'.$rev.'.txt';
+            if($conf['compression']){
+                //test for extensions here, we want to read both compressions
+                if (file_exists($fn . '.gz')){
+                    $fn .= '.gz';
+                }else if(file_exists($fn . '.bz2')){
+                    $fn .= '.bz2';
+                }else{
+                    //file doesnt exist yet, so we take the configured extension
+                    $fn .= '.' . $conf['compression'];
+                }
+            }
+        }
+
+        return $fn;
+    }
+
+    /**
+     * renders the metadata of a page
+     *
+     * @author Esther Brunner <esther@kaffeehaus.ch>
+     *
+     * @param string $id   page id
+     * @param array  $orig the original metadata
+     * @param        $pageFileName
+     * @return array|null array('current'=> array,'persistent'=> array);
+     */
+    function p_render_metadata($id, $orig, $pageFileName){
+        // make sure the correct ID is in global ID
+        global $ID;
+
+        $keep = $ID;
+        $ID   = $id;
+
+        // add an extra key for the event - to tell event handlers the page whose metadata this is
+        $orig['page'] = $id;
+        $evt = new Doku_Event('PARSER_METADATA_RENDER', $orig);
+        if ($evt->advise_before()) {
+
+            // get instructions
+            $instructions = p_cached_instructions($pageFileName,false,$id);
+            if(is_null($instructions)){
+                $ID = $keep;
+                return null; // something went wrong with the instructions
+            }
+
+            // set up the renderer
+            $renderer = new Doku_Renderer_metadata();
+            $renderer->meta =& $orig['current'];
+            $renderer->persistent =& $orig['persistent'];
+
+            // loop through the instructions
+            foreach ($instructions as $instruction){
+                // execute the callback against the renderer
+                call_user_func_array(array(&$renderer, $instruction[0]), (array) $instruction[1]);
+            }
+
+            $evt->result = array('current'=>&$renderer->meta,'persistent'=>&$renderer->persistent);
+        }
+        $evt->advise_after();
+
+        // clean up
+        $ID = $keep;
+        return $evt->result;
+    }
+
 }
 
 // Main

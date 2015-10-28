@@ -132,145 +132,34 @@ class Doku_Indexer_Enhanced extends Doku_Indexer {
         $this->indexesToFlush = array();
     }
 
-
     /**
      * Insert or replace a tuple in a line.
      *
      * @author Tom N Harris <tnharris@whoopdedo.org>
+     * @param string     $line
+     * @param int|string $id
+     * @param int        $count
+     * @return mixed|string
      */
     protected function updateTuple($line, $id, $count) {
         if ($line !== '') {
 
             if(substr($line, 0, strlen($id)) == $id) { // add check here see if line start with id, makes our regex 10x faster
-                $newLine = preg_replace('/^'.preg_quote($id,'/').'\*\d*/', '', $line);
+                $line = preg_replace('/^'.preg_quote($id,'/').'\*\d*/', '', $line);
             } else {
-                $newLine = preg_replace('/:'.preg_quote($id,'/').'\*\d*/', '', $line);
+                $line = preg_replace('/:'.preg_quote($id,'/').'\*\d*/', '', $line);
             }
         }
-        $newLine = trim($newLine, ':');
+        $line = trim($line, ':');
         if ($count) {
-            if (strlen($newLine) > 0)
-                return "$id*$count:".$newLine;
+            if (strlen($line) > 0)
+                return "$id*$count:".$line;
             else
-                return "$id*$count".$newLine;
+                return "$id*$count".$line;
         }
-        return $newLine;
+        return $line;
     }
 }
-
-
-
-/**
- * Adds/updates the search index for the given page
- *
- * Locking is handled internally.
- *
- * @param string    $page       name of the page to index
- * @param boolean   $verbose    print status messages
- * @param boolean   $force      force reindexing even when the index is up to date
- * @return boolean              the function completed successfully
- * @author Tom N Harris <tnharris@whoopdedo.org>
- */
-function enhanced_idx_addPage($page, $verbose=false, $force=false) {
-
-    $idxtag = metaFN($page,'.indexed');
-
-    // check if page was deleted but is still in the index
-    if (!page_exists($page)) {
-        if (!@file_exists($idxtag)) {
-            if ($verbose) print("Indexer: $page does not exist, ignoring".DOKU_LF);
-            return false;
-        }
-
-        $Indexer = enhanced_idx_get_indexer();
-        $result = $Indexer->deletePage($page);
-        if ($result === "locked") {
-            if ($verbose) print("Indexer: locked".DOKU_LF);
-            return false;
-        }
-
-        @unlink($idxtag);
-        return $result;
-    }
-
-    // check if indexing needed
-    if(!$force && @file_exists($idxtag)){
-        if(trim(io_readFile($idxtag)) == idx_get_version()){
-            $last = @filemtime($idxtag);
-            if($last > @filemtime(wikiFN($page))){
-                if ($verbose) print("Indexer: index for $page up to date".DOKU_LF);
-                return false;
-            }
-        }
-    }
-
-    $indexenabled = p_get_metadata($page, 'internal index', METADATA_RENDER_UNLIMITED);
-    if ($indexenabled === false) {
-        $result = false;
-        if (@file_exists($idxtag)) {
-            $Indexer = enhanced_idx_get_indexer();
-            $result = $Indexer->deletePage($page);
-            if ($result === "locked") {
-                if ($verbose) print("Indexer: locked".DOKU_LF);
-                return false;
-            }
-            @unlink($idxtag);
-        }
-        if ($verbose) print("Indexer: index disabled for $page".DOKU_LF);
-        return $result;
-    }
-
-    $Indexer = enhanced_idx_get_indexer();
-    $pid = $Indexer->getPID($page);
-    if ($pid === false) {
-        if ($verbose) print("Indexer: getting the PID failed for $page".DOKU_LF);
-        return false;
-    }
-    $body = '';
-    $metadata = array();
-    $metadata['title'] = p_get_metadata($page, 'title', METADATA_RENDER_UNLIMITED);
-    if (($references = p_get_metadata($page, 'relation references', METADATA_RENDER_UNLIMITED)) !== null)
-        $metadata['relation_references'] = array_keys($references);
-    else
-        $metadata['relation_references'] = array();
-
-    if (($media = p_get_metadata($page, 'relation media', METADATA_RENDER_UNLIMITED)) !== null)
-        $metadata['relation_media'] = array_keys($media);
-    else
-        $metadata['relation_media'] = array();
-
-    $data = compact('page', 'body', 'metadata', 'pid');
-    $evt = new Doku_Event('INDEXER_PAGE_ADD', $data);
-    if ($evt->advise_before()) $data['body'] = $data['body'] . " " . rawWiki($page);
-    $evt->advise_after();
-    unset($evt);
-    extract($data);
-
-    $result = $Indexer->addPageWords($page, $body);
-    if ($result === "locked") {
-        if ($verbose) print("Indexer: locked".DOKU_LF);
-        return false;
-    }
-
-    if ($result) {
-        $result = $Indexer->addMetaKeys($page, $metadata);
-        if ($result === "locked") {
-            if ($verbose) print("Indexer: locked".DOKU_LF);
-            return false;
-        }
-    }
-
-    if ($result) {
-        io_saveFile(metaFN($page,'.indexed'), idx_get_version());
-    }
-
-    if ($verbose) {
-        print("Indexer: finished".DOKU_LF);
-    }
-
-    return $result;
-}
-
 
 
 /**
