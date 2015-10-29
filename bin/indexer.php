@@ -492,11 +492,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         }
 
         $Indexer = enhanced_idx_get_indexer();
-        $pid = $Indexer->getPID($page);
-        if ($pid === false) {
-            if ($verbose) print("Indexer: getting the PID failed for $page".DOKU_LF);
-            return false;
-        }
+
         $body = '';
         $metadata = array();
         $metadata['title'] = p_get_metadata($page, 'title', METADATA_RENDER_UNLIMITED);
@@ -690,7 +686,6 @@ class EnhancedIndexerCLI extends DokuCLI {
         $ID = $keep;
         return $evt->result;
     }
-
 }
 
 // Main
