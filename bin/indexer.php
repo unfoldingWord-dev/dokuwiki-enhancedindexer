@@ -69,7 +69,6 @@ class EnhancedIndexerCLI extends DokuCLI {
     private $namespace = '';
     private $exit = false;
     private $lock_file;
-    private $root;
     private $remove_lock = true;
 
     /**
@@ -176,15 +175,19 @@ class EnhancedIndexerCLI extends DokuCLI {
             exit(1);
         }
 
-        $this->root = $conf['datadir'] . (empty($this->namespace) ? '' : '/' . $this->namespace);
-
         // index the root directory
-        $this->index_dir($this->root);
+        $this->index_dir($conf['datadir']);
 
         // get a list of namespaces
-        $ns_directories = glob($this->root . '/*', GLOB_ONLYDIR);
+        $ns_directories = glob($conf['datadir'] . '/*', GLOB_ONLYDIR);
 
         foreach($ns_directories as $ns_dir) {
+
+            if (!empty($this->namespace)) {
+                if (substr($ns_dir, strlen($this->namespace)*(-1)) != $this->namespace) {
+                    continue;
+                }
+            }
 
             // restart when memory usage exceeds 256M
             if(memory_get_usage() > (ONE_MEGABYTE * 384)) {
