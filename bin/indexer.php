@@ -186,6 +186,17 @@ class EnhancedIndexerCLI extends DokuCLI {
 
         foreach($ns_directories as $ns_dir) {
 
+            // restart when memory usage exceeds 256M
+            if(memory_get_usage() > (ONE_MEGABYTE * 384)) {
+                $this->error('Memory almost full, exiting.');
+                $this->exit = true;
+            }
+
+            // used to exit cleanly if ctrl+c is detected
+            if($this->exit) {
+                break;
+            }
+
             // check for a progress file
             $progress_file = $ns_dir . DS . '.indexer_progress';
             $next_dir = (is_file($progress_file)) ? file_get_contents($progress_file) : '';
@@ -204,17 +215,12 @@ class EnhancedIndexerCLI extends DokuCLI {
             }
 
             foreach ($dir_iterator as $path => $dir) {
-//                if (is_dir($entry->pathName) && (substr($entry->fileName, 0, 1) != '.')) {
-//                    if ($found_current) {
-//                        // save the next directory and break out of for loop
-//                        file_put_contents($progress_file, $entry);
-//                        break;
-//                    }
-//
-//                    if ($entry == $next_dir) {
-//                        $found_current = true;
-//                    }
-//                }
+
+                // used to exit cleanly if ctrl+c is detected
+                if($this->exit) {
+                    break;
+                }
+
                 if ($dir->isDir() && (substr($path, 0, 1) != '.')) {
 
                     if ($found_current) {
@@ -236,18 +242,24 @@ class EnhancedIndexerCLI extends DokuCLI {
      * @param $dir
      */
     function index_dir($dir) {
+        global $conf;
 
         $data = array();
         $this->quiet_echo("Searching pages... ");
         search($data, $dir, 'search_allpages', array('skipacl' => true, 'depth' => 1));
         $this->quiet_echo(count($data)." pages found.\n");
 
-        $ns_prefix = substr($dir, strlen($this->root) + 1);
+        $ns_prefix = substr($dir, strlen($conf['datadir']) + 1);
         if ($ns_prefix !== false) {
             $ns_prefix = str_replace(DIRECTORY_SEPARATOR, ':', $ns_prefix) . ':';
         }
 
         foreach($data as $val) {
+
+            if($this->exit) {
+                break;
+            }
+
             if ($ns_prefix !== false) {
                 $val['id'] = $ns_prefix . $val['id'];
             }
