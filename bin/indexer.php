@@ -221,7 +221,7 @@ class EnhancedIndexerCLI extends DokuCLI {
 
                 // used to exit cleanly if ctrl+c is detected
                 if($this->exit) {
-                    break;
+                    $this->quiet_echo("\nExiting after the current directory is finished.\n");
                 }
 
                 if ($dir->isDir() && (substr($path, 0, 1) != '.')) {
