@@ -176,7 +176,9 @@ class EnhancedIndexerCLI extends DokuCLI {
         }
 
         // index the root directory
-        $this->index_dir($conf['datadir']);
+        if (empty($this->namespace)) {
+            $this->index_dir($conf['datadir']);
+        }
 
         // get a list of namespaces
         $ns_directories = glob($conf['datadir'] . '/*', GLOB_ONLYDIR);
@@ -184,7 +186,7 @@ class EnhancedIndexerCLI extends DokuCLI {
         foreach($ns_directories as $ns_dir) {
 
             if (!empty($this->namespace)) {
-                if (substr($ns_dir, strlen($this->namespace)*(-1)) != $this->namespace) {
+                if (substr($ns_dir, strlen($this->namespace)*(-1) - 1) != '/' . $this->namespace) {
                     continue;
                 }
             }
@@ -218,11 +220,6 @@ class EnhancedIndexerCLI extends DokuCLI {
             }
 
             foreach ($dir_iterator as $path => $dir) {
-
-                // used to exit cleanly if ctrl+c is detected
-                if($this->exit) {
-                    $this->quiet_echo("\nExiting after the current directory is finished.\n");
-                }
 
                 if ($dir->isDir() && (substr($path, 0, 1) != '.')) {
 
